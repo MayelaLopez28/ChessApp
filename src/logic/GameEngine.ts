@@ -175,3 +175,28 @@ export const getValidMoves = (
   }
   return validMoves;
 };
+
+export const getRandomMove = (board: (Piece | null)[][], turn: PieceColor) => {
+  const allPossibleMoves: { from: Position; to: Position }[] = [];
+
+  for (let r = 0; r < 8; r++) {
+    for (let c = 0; c < 8; c++) {
+      const piece = board[r][c];
+      if (piece && piece.color === turn) {
+        const currentPos = { row: r, col: c };
+        const validDestinations = getValidMoves(board, currentPos, turn);
+
+        validDestinations.forEach(dest => {
+          allPossibleMoves.push({ from: currentPos, to: dest });
+        });
+      }
+    }
+  }
+
+  if (allPossibleMoves.length > 0) {
+    const randomIndex = Math.floor(Math.random() * allPossibleMoves.length);
+    return allPossibleMoves[randomIndex];
+  }
+
+  return null;
+};

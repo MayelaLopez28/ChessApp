@@ -3,9 +3,10 @@ import { View, StyleSheet, Dimensions, TouchableOpacity, Image, Text, Alert } fr
 import { Audio } from 'expo-av';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
+
 import { Piece, Position } from '../src/logic/Types';
 import { fenToBoard, INITIAL_FEN } from '../src/logic/FenParser';
-import { isMoveValid, findKing, isSquareAttacked, getValidMoves } from '../src/logic/GameEngine';
+import { isMoveValid, findKing, isSquareAttacked, getValidMoves, getRandomMove } from '../src/logic/GameEngine';
 import { boardToFen } from '../src/logic/FenGenerator';
 
 const PIECES_IMG: { [key: string]: any } = {
@@ -56,17 +57,24 @@ interface BoardProps {
     initialFen?: string;
     initialWhiteTime?: number;
     initialBlackTime?: number;
+    initialVsCpu?: boolean;
 }
 
-export default function Board({ initialFen, initialWhiteTime, initialBlackTime }: BoardProps) {
+export default function Board({ initialFen, initialWhiteTime, initialBlackTime, initialVsCpu }: BoardProps) {
     const router = useRouter();
+
     const [board, setBoard] = useState<(Piece | null)[][]>(fenToBoard(initialFen || INITIAL_FEN));
     const getTurnFromFen = (fen: string) => fen.split(' ')[1] as 'w' | 'b';
     const [turn, setTurn] = useState<'w' | 'b'>(initialFen ? getTurnFromFen(initialFen) : 'w');
+
     const [selectedPos, setSelectedPos] = useState<Position | null>(null);
     const [possibleMoves, setPossibleMoves] = useState<Position[]>([]);
-    const [whiteTime, setWhiteTime] = useState(initialWhiteTime || INITIAL_TIME);
-    const [blackTime, setBlackTime] = useState(initialBlackTime || INITIAL_TIME);
+
+    const [whiteTime, setWhiteTime] = useState(initialWhiteTime !== undefined ? initialWhiteTime : INITIAL_TIME);
+    const [blackTime, setBlackTime] = useState(initialBlackTime !== undefined ? initialBlackTime : INITIAL_TIME);
+    const [isPaused, setIsPaused] = useState(false);
+
+    const [isVsCpu] = useState(initialVsCpu ?? false);
 
     useEffect(() => {
         const configureAudio = async () => {
@@ -77,7 +85,7 @@ export default function Board({ initialFen, initialWhiteTime, initialBlackTime }
                     shouldDuckAndroid: true,
                 });
             } catch (e) {
-                console.log("Error configurando audio", e);
+                console.log("Error", e);
             }
         };
         configureAudio();
@@ -93,11 +101,43 @@ export default function Board({ initialFen, initialWhiteTime, initialBlackTime }
                 }
             });
         } catch (error) {
-            console.log("Error audio:", error);
+            console.log("Error", error);
         }
     };
 
     useEffect(() => {
+        if (isVsCpu && turn === 'b' && !isPaused) {
+            const cpuTimer = setTimeout(() => {
+                const move = getRandomMove(board, 'b');
+                if (move) {
+                    performMove(move.from, move.to);
+                } else {
+                    Alert.alert("Juego Terminado", "¡Las negras no tienen movimientos!");
+                    setIsPaused(true);
+                }
+            }, 500);
+            return () => clearTimeout(cpuTimer);
+        }
+    }, [turn, isVsCpu, isPaused, board]);
+
+    const performMove = (from: Position, to: Position) => {
+        const newBoard = board.map(r => [...r]);
+        newBoard[to.row][to.col] = newBoard[from.row][from.col];
+        newBoard[from.row][from.col] = null;
+
+        if (newBoard[to.row][to.col]) {
+            newBoard[to.row][to.col]!.hasMoved = true;
+        }
+
+        setBoard(newBoard);
+        setTurn(prev => prev === 'w' ? 'b' : 'w');
+        setSelectedPos(null);
+        setPossibleMoves([]);
+        playMoveSound();
+    };
+
+    useEffect(() => {
+        if (isPaused) return;
         const timer = setInterval(() => {
             if (turn === 'w') {
                 setWhiteTime((prev) => (prev > 0 ? prev - 1 : 0));
@@ -106,45 +146,12 @@ export default function Board({ initialFen, initialWhiteTime, initialBlackTime }
             }
         }, 1000);
         return () => clearInterval(timer);
-    }, [turn]);
-
-    const handleExit = () => {
-        Alert.alert(
-            "Salir al Menú",
-            "¿Deseas guardar la partida antes de salir?",
-            [
-                {
-                    text: "Cancelar",
-                    style: "cancel"
-                },
-                {
-                    text: "No guardar",
-                    style: "destructive",
-                    onPress: () => router.back()
-                },
-                {
-                    text: "Guardar y Salir",
-                    onPress: async () => {
-                        try {
-                            const currentFen = boardToFen(board, turn);
-                            const gameState = {
-                                fen: currentFen,
-                                whiteTime: whiteTime,
-                                blackTime: blackTime,
-                                timestamp: Date.now()
-                            };
-                            await AsyncStorage.setItem('savedGame', JSON.stringify(gameState));
-                            router.back();
-                        } catch (e) {
-                            console.error("Error guardando", e);
-                        }
-                    }
-                }
-            ]
-        );
-    };
+    }, [turn, isPaused]);
 
     const handlePress = (row: number, col: number) => {
+        if (isPaused) return;
+        if (isVsCpu && turn === 'b') return;
+
         if (!selectedPos) {
             const piece = board[row][col];
             if (piece && piece.color === turn) {
@@ -165,25 +172,41 @@ export default function Board({ initialFen, initialWhiteTime, initialBlackTime }
             const isTargetPossible = possibleMoves.some(p => p.row === row && p.col === col);
 
             if (isTargetPossible && isMoveValid(board, from, to, turn)) {
-                const newBoard = board.map(r => [...r]);
-                newBoard[to.row][to.col] = newBoard[from.row][from.col];
-                newBoard[from.row][from.col] = null;
-
-                if (newBoard[to.row][to.col]) {
-                    newBoard[to.row][to.col]!.hasMoved = true;
-                }
-
-                setBoard(newBoard);
-                setTurn(turn === 'w' ? 'b' : 'w');
-                setSelectedPos(null);
-                setPossibleMoves([]);
-
-                playMoveSound();
+                performMove(from, to);
             } else {
                 setSelectedPos(null);
                 setPossibleMoves([]);
             }
         }
+    };
+
+    const handleExit = () => {
+        setIsPaused(true);
+        Alert.alert(
+            "Salir al Menú",
+            "¿Deseas guardar la partida antes de salir?",
+            [
+                { text: "Cancelar", style: "cancel", onPress: () => setIsPaused(false) },
+                { text: "No guardar", style: "destructive", onPress: () => router.back() },
+                {
+                    text: "Guardar y Salir",
+                    onPress: async () => {
+                        try {
+                            const currentFen = boardToFen(board, turn);
+                            const gameState = {
+                                fen: currentFen,
+                                whiteTime: whiteTime,
+                                blackTime: blackTime,
+                                isVsCpu: isVsCpu,
+                                timestamp: Date.now()
+                            };
+                            await AsyncStorage.setItem('savedGame', JSON.stringify(gameState));
+                            router.back();
+                        } catch (e) { console.error(e); router.back(); }
+                    }
+                }
+            ]
+        );
     };
 
     const kingInCheckPos = (() => {
@@ -202,9 +225,16 @@ export default function Board({ initialFen, initialWhiteTime, initialBlackTime }
             <View style={[styles.clockContainer, turn === 'b' ? styles.clockActive : styles.clockInactive]}>
                 <Text style={styles.clockText}>{formatTime(blackTime)}</Text>
             </View>
-            <Text style={styles.turnText}>
-                Turno: {turn === 'w' ? 'Blancas' : 'Negras'}
-            </Text>
+
+            <View style={styles.infoRow}>
+                <Text style={styles.turnText}>
+                    Turno: {turn === 'w' ? 'Blancas' : 'Negras'}
+                </Text>
+                <Text style={styles.modeText}>
+                    {isVsCpu ? '(Vs CPU)' : '(Vs Jugador)'}
+                </Text>
+            </View>
+
             <View style={styles.boardFrame}>
                 <View style={styles.coordinatesRow}>
                     <View style={styles.emptyCoordinate} />
@@ -247,6 +277,7 @@ export default function Board({ initialFen, initialWhiteTime, initialBlackTime }
                                                 }
                                             ]}
                                             onPress={() => handlePress(r, c)}
+                                            activeOpacity={1}
                                         >
                                             {piece && pieceKey && (
                                                 <Image
@@ -262,6 +293,7 @@ export default function Board({ initialFen, initialWhiteTime, initialBlackTime }
                     </View>
                     <View style={styles.coordinatesColumn} />
                 </View>
+
                 <View style={styles.coordinatesRow}>
                     <View style={styles.emptyCoordinate} />
                     {files.map((file, index) => (
@@ -270,9 +302,11 @@ export default function Board({ initialFen, initialWhiteTime, initialBlackTime }
                     <View style={styles.emptyCoordinate} />
                 </View>
             </View>
+
             <View style={[styles.clockContainer, turn === 'w' ? styles.clockActive : styles.clockInactive, {marginTop: 20}]}>
                 <Text style={styles.clockText}>{formatTime(whiteTime)}</Text>
             </View>
+
             <TouchableOpacity onPress={handleExit} style={styles.backButton}>
                 <Text style={styles.backButtonText}>Salir al Menú</Text>
             </TouchableOpacity>
@@ -281,22 +315,119 @@ export default function Board({ initialFen, initialWhiteTime, initialBlackTime }
 }
 
 const styles = StyleSheet.create({
-    gameContainer: { alignItems: 'center', paddingBottom: 20, flex: 1, justifyContent: 'center' },
-    turnText: { fontSize: 24, fontWeight: 'bold', color: COLORS.COORDENADAS_TEXTO, marginBottom: 10, marginTop: 10 },
-    clockContainer: { paddingVertical: 10, paddingHorizontal: 25, borderRadius: 10, minWidth: 120, alignItems: 'center' },
-    clockActive: { backgroundColor: COLORS.RELOJ_ACTIVO, elevation: 5 },
-    clockInactive: { backgroundColor: COLORS.RELOJ_INACTIVO, opacity: 0.7 },
-    clockText: { fontSize: 28, fontWeight: 'bold', color: 'white', fontVariant: ['tabular-nums'] },
-    boardFrame: { backgroundColor: COLORS.FONDO_TABLERO, borderRadius: 8, padding: 5, shadowColor: "#000", shadowOffset: { width: 0, height: 5 }, shadowOpacity: 0.34, shadowRadius: 6.27, elevation: 10 },
-    mainBoardArea: { flexDirection: 'row' },
-    boardContainer: { width: BOARD_DIMENSION, height: BOARD_DIMENSION },
-    row: { flexDirection: 'row' },
-    tile: { width: TILE_SIZE, height: TILE_SIZE, justifyContent: 'center', alignItems: 'center' },
-    pieceImage: { width: TILE_SIZE * 0.85, height: TILE_SIZE * 0.85, resizeMode: 'contain' },
-    coordinatesRow: { flexDirection: 'row', justifyContent: 'space-around', alignItems: 'center', width: BOARD_DIMENSION + COORDINATE_SIZE * 2, height: COORDINATE_SIZE },
-    coordinatesColumn: { justifyContent: 'space-around', alignItems: 'center', width: COORDINATE_SIZE, height: BOARD_DIMENSION },
-    coordinateText: { color: COLORS.COORDENADAS_TEXTO, fontSize: TILE_SIZE * 0.3, fontWeight: 'bold', width: TILE_SIZE, textAlign: 'center' },
-    emptyCoordinate: { width: COORDINATE_SIZE, height: COORDINATE_SIZE },
-    backButton: { marginTop: 30, backgroundColor: COLORS.BOTON, paddingVertical: 10, paddingHorizontal: 20, borderRadius: 8 },
-    backButtonText: { color: COLORS.TEXTO_CLARO, fontSize: 18, fontWeight: 'bold' },
+    gameContainer: {
+        alignItems: 'center',
+        paddingBottom: 20,
+        flex: 1,
+        justifyContent: 'center',
+    },
+    infoRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        width: '85%',
+        marginBottom: 10,
+        marginTop: 10,
+    },
+    turnText: {
+        fontSize: 24,
+        fontWeight: 'bold',
+        color: COLORS.COORDENADAS_TEXTO,
+    },
+    modeText: {
+        fontSize: 16,
+        color: COLORS.CLARO,
+        fontStyle: 'italic',
+    },
+    clockContainer: {
+        paddingVertical: 10,
+        paddingHorizontal: 25,
+        borderRadius: 10,
+        minWidth: 120,
+        alignItems: 'center',
+    },
+    clockActive: {
+        backgroundColor: COLORS.RELOJ_ACTIVO,
+        elevation: 5,
+    },
+    clockInactive: {
+        backgroundColor: COLORS.RELOJ_INACTIVO,
+        opacity: 0.7,
+    },
+    clockText: {
+        fontSize: 28,
+        fontWeight: 'bold',
+        color: 'white',
+        fontVariant: ['tabular-nums'],
+    },
+    boardFrame: {
+        backgroundColor: COLORS.FONDO_TABLERO,
+        borderRadius: 8,
+        padding: 5,
+        shadowColor: "#000",
+        shadowOffset: {
+            width: 0,
+            height: 5,
+        },
+        shadowOpacity: 0.34,
+        shadowRadius: 6.27,
+        elevation: 10,
+    },
+    mainBoardArea: {
+        flexDirection: 'row',
+    },
+    boardContainer: {
+        width: BOARD_DIMENSION,
+        height: BOARD_DIMENSION,
+    },
+    row: {
+        flexDirection: 'row',
+    },
+    tile: {
+        width: TILE_SIZE,
+        height: TILE_SIZE,
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    pieceImage: {
+        width: TILE_SIZE * 0.85,
+        height: TILE_SIZE * 0.85,
+        resizeMode: 'contain',
+    },
+    coordinatesRow: {
+        flexDirection: 'row',
+        justifyContent: 'space-around',
+        alignItems: 'center',
+        width: BOARD_DIMENSION + COORDINATE_SIZE * 2,
+        height: COORDINATE_SIZE,
+    },
+    coordinatesColumn: {
+        justifyContent: 'space-around',
+        alignItems: 'center',
+        width: COORDINATE_SIZE,
+        height: BOARD_DIMENSION,
+    },
+    coordinateText: {
+        color: COLORS.COORDENADAS_TEXTO,
+        fontSize: TILE_SIZE * 0.3,
+        fontWeight: 'bold',
+        width: TILE_SIZE,
+        textAlign: 'center',
+    },
+    emptyCoordinate: {
+        width: COORDINATE_SIZE,
+        height: COORDINATE_SIZE,
+    },
+    backButton: {
+        marginTop: 30,
+        backgroundColor: COLORS.BOTON,
+        paddingVertical: 10,
+        paddingHorizontal: 20,
+        borderRadius: 8,
+    },
+    backButtonText: {
+        color: COLORS.TEXTO_CLARO,
+        fontSize: 18,
+        fontWeight: 'bold',
+    },
 });

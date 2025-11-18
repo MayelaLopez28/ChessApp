@@ -3,6 +3,23 @@ import { router } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export default function MainMenu() {
+  const handleNewGame = () => {
+    Alert.alert(
+      "Nueva Partida",
+      "Selecciona el modo de juego:",
+      [
+        { text: "Cancelar", style: "cancel" },
+        {
+          text: "Vs Jugador",
+          onPress: () => router.push({ pathname: "/game", params: { vsCpu: 'false' } })
+        },
+        {
+          text: "Vs CPU",
+          onPress: () => router.push({ pathname: "/game", params: { vsCpu: 'true' } })
+        }
+      ]
+    );
+  };
 
   const handleContinue = async () => {
       try {
@@ -14,7 +31,8 @@ export default function MainMenu() {
                   params: {
                       fen: gameState.fen,
                       whiteTime: gameState.whiteTime,
-                      blackTime: gameState.blackTime
+                      blackTime: gameState.blackTime,
+                      vsCpu: String(gameState.isVsCpu)
                   }
               });
           } else {
@@ -31,7 +49,7 @@ export default function MainMenu() {
 
       <TouchableOpacity
         style={styles.button}
-        onPress={() => router.push("/game")}
+        onPress={handleNewGame}
       >
         <Text style={styles.buttonText}>Nueva Partida</Text>
       </TouchableOpacity>

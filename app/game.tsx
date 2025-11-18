@@ -9,10 +9,10 @@ const COLORS = {
 
 export default function GameScreen() {
   const params = useLocalSearchParams();
-
   const initialFen = typeof params.fen === 'string' ? params.fen : undefined;
   const initialWhiteTime = params.whiteTime ? parseInt(params.whiteTime as string) : undefined;
   const initialBlackTime = params.blackTime ? parseInt(params.blackTime as string) : undefined;
+  const initialVsCpu = params.vsCpu === 'true';
 
   return (
     <View style={styles.container}>
@@ -20,6 +20,7 @@ export default function GameScreen() {
           initialFen={initialFen}
           initialWhiteTime={initialWhiteTime}
           initialBlackTime={initialBlackTime}
+          initialVsCpu={initialVsCpu}
       />
     </View>
   );
