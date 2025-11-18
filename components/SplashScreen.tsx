@@ -5,10 +5,14 @@ const { width } = Dimensions.get('window');
 
 const BG_COLOR = '#FFFFFF';
 
+/**
+ * Componente que muestra una animacion de carga (splash screen) al inicio de la aplicacion
+ */
 export default function SplashScreen() {
   return (
     <View style={styles.container}>
       <Image
+        // Carga el GIF animado desde los assets
         source={require('../assets/images/chess.gif')}
         style={styles.image}
       />

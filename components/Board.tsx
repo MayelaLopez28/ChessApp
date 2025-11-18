@@ -54,19 +54,26 @@ const formatTime = (seconds: number) => {
 };
 
 interface BoardProps {
-    initialFen?: string;
-    initialWhiteTime?: number;
-    initialBlackTime?: number;
-    initialVsCpu?: boolean;
+    initialFen?: string;       // FEN inicial para cargar partida
+    initialWhiteTime?: number; // Tiempo restante blancas
+    initialBlackTime?: number; // Tiempo restante negras
+    initialVsCpu?: boolean;    // Modo de juego: true para vs CPU
 }
 
+/**
+ * Componente Principal del Tablero de Ajedrez
+ * Maneja la renderización, input del usuario, temporizadores y ciclo de vida del juego
+ */
 export default function Board({ initialFen, initialWhiteTime, initialBlackTime, initialVsCpu }: BoardProps) {
     const router = useRouter();
-
+    // Tablero: Matriz 8x8 que contiene las piezas o null
     const [board, setBoard] = useState<(Piece | null)[][]>(fenToBoard(initialFen || INITIAL_FEN));
     const getTurnFromFen = (fen: string) => fen.split(' ')[1] as 'w' | 'b';
+    // Turno: 'w' (White) o 'b' (Black)
     const [turn, setTurn] = useState<'w' | 'b'>(initialFen ? getTurnFromFen(initialFen) : 'w');
+    // Seleccion: Posicion de la pieza seleccionada actualmente
     const [selectedPos, setSelectedPos] = useState<Position | null>(null);
+    // Guia Visual: Array de posiciones validas para la pieza seleccionada
     const [possibleMoves, setPossibleMoves] = useState<Position[]>([]);
     const [whiteTime, setWhiteTime] = useState(initialWhiteTime !== undefined ? initialWhiteTime : INITIAL_TIME);
     const [blackTime, setBlackTime] = useState(initialBlackTime !== undefined ? initialBlackTime : INITIAL_TIME);

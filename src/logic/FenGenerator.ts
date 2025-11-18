@@ -1,5 +1,12 @@
 import { Piece } from './Types';
 
+/**
+ * Serializa el estado actual del tablero a una cadena FEN
+ * Utilizado para guardar la partida en AsyncStorage
+ * @param board Estado actual del tablero
+ * @param turn Turno actual ('w' o 'b')
+ * @returns Cadena FEN.
+ */
 export const boardToFen = (board: (Piece | null)[][], turn: string): string => {
     let fen = "";
 

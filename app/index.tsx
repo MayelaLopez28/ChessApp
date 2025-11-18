@@ -3,8 +3,17 @@ import { View, Text, StyleSheet, TouchableOpacity, Alert, Image } from 'react-na
 import { router } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
+/**
+ * Componente de la pantalla principal (Menú)
+ * Permite iniciar partidas nuevas con selección de modo o cargar la ultima partida guardada
+ */
 export default function MainMenu() {
 
+  /**
+   * Muestra una alerta para que el usuario elija el modo de juego
+   * antes de iniciar una nueva partida
+   * Navega a la pantalla 'game' pasando el parámetro vsCpu.
+   */
   const handleNewGame = () => {
     Alert.alert(
       "Nueva Partida",
@@ -23,6 +32,10 @@ export default function MainMenu() {
     );
   };
 
+  /**
+   * Intenta cargar la ultima partida guardada de AsyncStorage
+   * Si existe, navega a la pantalla 'game' pasando todos los datos (FEN, tiempos, modo)
+   */
   const handleContinue = async () => {
       try {
           const savedGame = await AsyncStorage.getItem('savedGame');

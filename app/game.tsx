@@ -7,6 +7,10 @@ const COLORS = {
     FONDO: '#762E3F',
 };
 
+/**
+ * Pantalla que aloja el juego de ajedrez activo
+ * Extrae los parametros de la URL para inicializar el tablero (partida nueva o cargada)
+ */
 export default function GameScreen() {
   const params = useLocalSearchParams();
   const initialFen = typeof params.fen === 'string' ? params.fen : undefined;
