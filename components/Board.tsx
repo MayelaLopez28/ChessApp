@@ -1,12 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { View, StyleSheet, Dimensions, TouchableOpacity, Image, Text, Alert } from 'react-native';
+import { View, StyleSheet, Dimensions, TouchableOpacity, Image, Text, Alert, Modal } from 'react-native';
 import { Audio } from 'expo-av';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
-
 import { Piece, Position } from '../src/logic/Types';
 import { fenToBoard, INITIAL_FEN } from '../src/logic/FenParser';
-import { isMoveValid, findKing, isSquareAttacked, getValidMoves, getRandomMove } from '../src/logic/GameEngine';
+import { isMoveValid, findKing, isSquareAttacked, getValidMoves, getBestMove, getGameStatus } from '../src/logic/GameEngine';
 import { boardToFen } from '../src/logic/FenGenerator';
 
 const PIECES_IMG: { [key: string]: any } = {
@@ -39,6 +38,7 @@ const COLORS = {
     RELOJ_INACTIVO: '#888',
     BOTON: '#B83556',
     TEXTO_CLARO: '#E8DDDD',
+    OVERLAY_BG: 'rgba(0,0,0,0.8)',
 };
 
 const { width } = Dimensions.get('window');
@@ -66,15 +66,13 @@ export default function Board({ initialFen, initialWhiteTime, initialBlackTime, 
     const [board, setBoard] = useState<(Piece | null)[][]>(fenToBoard(initialFen || INITIAL_FEN));
     const getTurnFromFen = (fen: string) => fen.split(' ')[1] as 'w' | 'b';
     const [turn, setTurn] = useState<'w' | 'b'>(initialFen ? getTurnFromFen(initialFen) : 'w');
-
     const [selectedPos, setSelectedPos] = useState<Position | null>(null);
     const [possibleMoves, setPossibleMoves] = useState<Position[]>([]);
-
     const [whiteTime, setWhiteTime] = useState(initialWhiteTime !== undefined ? initialWhiteTime : INITIAL_TIME);
     const [blackTime, setBlackTime] = useState(initialBlackTime !== undefined ? initialBlackTime : INITIAL_TIME);
     const [isPaused, setIsPaused] = useState(false);
-
-    const [isVsCpu] = useState(initialVsCpu ?? false);
+    const [gameOver, setGameOver] = useState<{ winner: string, reason: string } | null>(null);
+    const [isVsCpu, setIsVsCpu] = useState(initialVsCpu ?? false);
 
     useEffect(() => {
         const configureAudio = async () => {
@@ -84,9 +82,7 @@ export default function Board({ initialFen, initialWhiteTime, initialBlackTime, 
                     staysActiveInBackground: false,
                     shouldDuckAndroid: true,
                 });
-            } catch (e) {
-                console.log("Error", e);
-            }
+            } catch (e) { console.log("Error", e); }
         };
         configureAudio();
     }, []);
@@ -96,29 +92,53 @@ export default function Board({ initialFen, initialWhiteTime, initialBlackTime, 
             const { sound } = await Audio.Sound.createAsync(SOUNDS.move);
             await sound.playAsync();
             sound.setOnPlaybackStatusUpdate(async (status) => {
-                if (status.isLoaded && status.didJustFinish) {
-                    await sound.unloadAsync();
-                }
+                if (status.isLoaded && status.didJustFinish) await sound.unloadAsync();
             });
-        } catch (error) {
-            console.log("Error", error);
-        }
+        } catch (error) { console.log("Error", error); }
     };
 
     useEffect(() => {
-        if (isVsCpu && turn === 'b' && !isPaused) {
+        if (gameOver) return;
+
+        const status = getGameStatus(board, turn);
+
+        if (status === 'checkmate') {
+            setGameOver({
+                winner: turn === 'w' ? 'Negras' : 'Blancas',
+                reason: 'Jaque Mate'
+            });
+            setIsPaused(true);
+        } else if (status === 'stalemate') {
+            setGameOver({
+                winner: 'Empate',
+                reason: 'Tablas por Ahogado'
+            });
+            setIsPaused(true);
+        }
+    }, [turn, board]);
+
+    useEffect(() => {
+        if (whiteTime <= 0 && !gameOver) {
+            setGameOver({ winner: 'Negras', reason: 'Tiempo Agotado' });
+            setIsPaused(true);
+        }
+        if (blackTime <= 0 && !gameOver) {
+            setGameOver({ winner: 'Blancas', reason: 'Tiempo Agotado' });
+            setIsPaused(true);
+        }
+    }, [whiteTime, blackTime]);
+
+    useEffect(() => {
+        if (isVsCpu && turn === 'b' && !isPaused && !gameOver) {
             const cpuTimer = setTimeout(() => {
-                const move = getRandomMove(board, 'b');
+                const move = getBestMove(board, 'b');
                 if (move) {
                     performMove(move.from, move.to);
-                } else {
-                    Alert.alert("Juego Terminado", "¡Las negras no tienen movimientos!");
-                    setIsPaused(true);
                 }
-            }, 500);
+            }, 1000);
             return () => clearTimeout(cpuTimer);
         }
-    }, [turn, isVsCpu, isPaused, board]);
+    }, [turn, isVsCpu, isPaused, board, gameOver]);
 
     const performMove = (from: Position, to: Position) => {
         const newBoard = board.map(r => [...r]);
@@ -137,7 +157,7 @@ export default function Board({ initialFen, initialWhiteTime, initialBlackTime, 
     };
 
     useEffect(() => {
-        if (isPaused) return;
+        if (isPaused || gameOver) return;
         const timer = setInterval(() => {
             if (turn === 'w') {
                 setWhiteTime((prev) => (prev > 0 ? prev - 1 : 0));
@@ -146,10 +166,10 @@ export default function Board({ initialFen, initialWhiteTime, initialBlackTime, 
             }
         }, 1000);
         return () => clearInterval(timer);
-    }, [turn, isPaused]);
+    }, [turn, isPaused, gameOver]);
 
     const handlePress = (row: number, col: number) => {
-        if (isPaused) return;
+        if (isPaused || gameOver) return;
         if (isVsCpu && turn === 'b') return;
 
         if (!selectedPos) {
@@ -209,11 +229,19 @@ export default function Board({ initialFen, initialWhiteTime, initialBlackTime, 
         );
     };
 
+    const resetGame = (vsCpuMode: boolean) => {
+        setBoard(fenToBoard(INITIAL_FEN));
+        setTurn('w');
+        setWhiteTime(INITIAL_TIME);
+        setBlackTime(INITIAL_TIME);
+        setGameOver(null);
+        setIsVsCpu(vsCpuMode);
+        setIsPaused(false);
+    };
+
     const kingInCheckPos = (() => {
         const kingPos = findKing(board, turn);
-        if (kingPos && isSquareAttacked(board, kingPos, turn)) {
-            return kingPos;
-        }
+        if (kingPos && isSquareAttacked(board, kingPos, turn)) return kingPos;
         return null;
     })();
 
@@ -222,6 +250,45 @@ export default function Board({ initialFen, initialWhiteTime, initialBlackTime, 
 
     return (
         <View style={styles.gameContainer}>
+            <Modal
+                transparent={true}
+                visible={gameOver !== null}
+                animationType="fade"
+            >
+                <View style={styles.modalOverlay}>
+                    <View style={styles.modalContent}>
+                        <Text style={styles.modalTitle}>¡Juego Terminado!</Text>
+                        <Text style={styles.modalReason}>{gameOver?.reason}</Text>
+                        <Text style={styles.modalWinner}>
+                            {gameOver?.winner === 'Empate' ? 'Es un Empate' : `Ganador: ${gameOver?.winner}`}
+                        </Text>
+
+                        <View style={styles.modalButtons}>
+                            <TouchableOpacity
+                                style={styles.modalBtn}
+                                onPress={() => resetGame(false)}
+                            >
+                                <Text style={styles.modalBtnText}>Nueva Partida (1v1)</Text>
+                            </TouchableOpacity>
+
+                            <TouchableOpacity
+                                style={styles.modalBtn}
+                                onPress={() => resetGame(true)}
+                            >
+                                <Text style={styles.modalBtnText}>Nueva Partida (vs CPU)</Text>
+                            </TouchableOpacity>
+
+                            <TouchableOpacity
+                                style={[styles.modalBtn, { backgroundColor: '#555' }]}
+                                onPress={() => router.back()}
+                            >
+                                <Text style={styles.modalBtnText}>Regresar al Menú</Text>
+                            </TouchableOpacity>
+                        </View>
+                    </View>
+                </View>
+            </Modal>
+
             <View style={[styles.clockContainer, turn === 'b' ? styles.clockActive : styles.clockInactive]}>
                 <Text style={styles.clockText}>{formatTime(blackTime)}</Text>
             </View>
@@ -430,4 +497,52 @@ const styles = StyleSheet.create({
         fontSize: 18,
         fontWeight: 'bold',
     },
+    modalOverlay: {
+        flex: 1,
+        justifyContent: 'center',
+        alignItems: 'center',
+        backgroundColor: COLORS.OVERLAY_BG,
+    },
+    modalContent: {
+        backgroundColor: COLORS.FONDO_TABLERO,
+        padding: 30,
+        borderRadius: 15,
+        alignItems: 'center',
+        width: '80%',
+        borderWidth: 2,
+        borderColor: COLORS.OSCURO,
+    },
+    modalTitle: {
+        fontSize: 28,
+        fontWeight: 'bold',
+        color: 'white',
+        marginBottom: 10,
+    },
+    modalReason: {
+        fontSize: 20,
+        color: COLORS.CLARO,
+        marginBottom: 5,
+    },
+    modalWinner: {
+        fontSize: 24,
+        fontWeight: 'bold',
+        color: COLORS.RELOJ_ACTIVO,
+        marginBottom: 25,
+    },
+    modalButtons: {
+        width: '100%',
+        gap: 10,
+    },
+    modalBtn: {
+        backgroundColor: COLORS.BOTON,
+        padding: 15,
+        borderRadius: 8,
+        alignItems: 'center',
+        marginTop: 10,
+    },
+    modalBtnText: {
+        color: 'white',
+        fontSize: 16,
+        fontWeight: 'bold',
+    }
 });

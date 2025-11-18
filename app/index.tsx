@@ -1,8 +1,10 @@
-import { View, Text, StyleSheet, TouchableOpacity, Alert } from 'react-native';
+import React from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, Alert, Image } from 'react-native';
 import { router } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export default function MainMenu() {
+
   const handleNewGame = () => {
     Alert.alert(
       "Nueva Partida",
@@ -46,14 +48,16 @@ export default function MainMenu() {
   return (
     <View style={styles.container}>
       <Text style={styles.title}>AJEDREZ</Text>
-
+      <Image
+        source={require('../assets/images/chessboard.png')}
+        style={styles.logo}
+      />
       <TouchableOpacity
         style={styles.button}
         onPress={handleNewGame}
       >
         <Text style={styles.buttonText}>Nueva Partida</Text>
       </TouchableOpacity>
-
       <TouchableOpacity style={styles.button} onPress={handleContinue}>
         <Text style={styles.buttonText}>Continuar</Text>
       </TouchableOpacity>
@@ -72,16 +76,33 @@ const styles = StyleSheet.create({
       fontSize: 48,
       color: '#E8DDDD',
       fontWeight: 'bold',
-      marginBottom: 50
+      marginBottom: 10,
+      textShadowColor: 'rgba(0, 0, 0, 0.3)',
+      textShadowOffset: { width: 2, height: 2 },
+      textShadowRadius: 5,
+  },
+  logo: {
+      width: 250,
+      height: 250,
+      resizeMode: 'contain',
+      marginBottom: 40,
   },
   button: {
       backgroundColor: '#B83556',
       paddingVertical: 15,
       paddingHorizontal: 40,
-      borderRadius: 8,
+      borderRadius: 10,
       marginBottom: 20,
       width: 250,
-      alignItems: 'center'
+      alignItems: 'center',
+      shadowColor: "#000",
+      shadowOffset: {
+          width: 0,
+          height: 4,
+      },
+      shadowOpacity: 0.30,
+      shadowRadius: 4.65,
+      elevation: 8,
   },
   buttonText: {
       color: 'white',
