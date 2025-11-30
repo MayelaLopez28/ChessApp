@@ -3,9 +3,9 @@ import { View, StyleSheet, Dimensions, TouchableOpacity, Image, Text, Alert, Mod
 import { Audio } from 'expo-av';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
-import { Piece, Position } from '../src/logic/Types';
+import { Piece, Position, PieceType } from '../src/logic/Types';
 import { fenToBoard, INITIAL_FEN } from '../src/logic/FenParser';
-import { isMoveValid, findKing, isSquareAttacked, getValidMoves, getBestMove, getGameStatus } from '../src/logic/GameEngine';
+import { isMoveValid, findKing, isSquareAttacked, getValidMoves, getBestMove, getGameStatus, hasInsufficientMaterial } from '../src/logic/GameEngine';
 import { boardToFen } from '../src/logic/FenGenerator';
 
 const PIECES_IMG: { [key: string]: any } = {
@@ -66,20 +66,20 @@ interface BoardProps {
  */
 export default function Board({ initialFen, initialWhiteTime, initialBlackTime, initialVsCpu }: BoardProps) {
     const router = useRouter();
-    // Tablero: Matriz 8x8 que contiene las piezas o null
     const [board, setBoard] = useState<(Piece | null)[][]>(fenToBoard(initialFen || INITIAL_FEN));
     const getTurnFromFen = (fen: string) => fen.split(' ')[1] as 'w' | 'b';
-    // Turno: 'w' (White) o 'b' (Black)
     const [turn, setTurn] = useState<'w' | 'b'>(initialFen ? getTurnFromFen(initialFen) : 'w');
-    // Seleccion: Posicion de la pieza seleccionada actualmente
     const [selectedPos, setSelectedPos] = useState<Position | null>(null);
-    // Guia Visual: Array de posiciones validas para la pieza seleccionada
     const [possibleMoves, setPossibleMoves] = useState<Position[]>([]);
     const [whiteTime, setWhiteTime] = useState(initialWhiteTime !== undefined ? initialWhiteTime : INITIAL_TIME);
     const [blackTime, setBlackTime] = useState(initialBlackTime !== undefined ? initialBlackTime : INITIAL_TIME);
     const [isPaused, setIsPaused] = useState(false);
     const [gameOver, setGameOver] = useState<{ winner: string, reason: string } | null>(null);
     const [isVsCpu, setIsVsCpu] = useState(initialVsCpu ?? false);
+    const [halfMoveClock, setHalfMoveClock] = useState(0);
+    const [positionHistory, setPositionHistory] = useState<Record<string, number>>({ [initialFen || INITIAL_FEN]: 1 });
+    const [showPromotionModal, setShowPromotionModal] = useState(false);
+    const [pendingMove, setPendingMove] = useState<{ from: Position, to: Position } | null>(null);
 
     useEffect(() => {
         const configureAudio = async () => {
@@ -105,24 +105,47 @@ export default function Board({ initialFen, initialWhiteTime, initialBlackTime, 
     };
 
     useEffect(() => {
-        if (gameOver) return;
+        if (gameOver) {
+            return;
+        }
 
         const status = getGameStatus(board, turn);
-
         if (status === 'checkmate') {
             setGameOver({
                 winner: turn === 'w' ? 'Negras' : 'Blancas',
                 reason: 'Jaque Mate'
             });
             setIsPaused(true);
+            return;
         } else if (status === 'stalemate') {
             setGameOver({
                 winner: 'Empate',
                 reason: 'Tablas por Ahogado'
             });
             setIsPaused(true);
+            return;
         }
-    }, [turn, board]);
+
+        if (hasInsufficientMaterial(board)) {
+            setGameOver({ winner: 'Empate', reason: 'Material Insuficiente' });
+            setIsPaused(true);
+            return;
+        }
+
+        if (halfMoveClock >= 100) {
+            setGameOver({ winner: 'Empate', reason: 'Regla de 50 Movimientos' });
+            setIsPaused(true);
+            return;
+        }
+
+        const currentFen = boardToFen(board, turn);
+        if (positionHistory[currentFen] >= 3) {
+            setGameOver({ winner: 'Empate', reason: 'Triple Repetición' });
+            setIsPaused(true);
+            return;
+        }
+
+    }, [turn, board, halfMoveClock, positionHistory]);
 
     useEffect(() => {
         if (whiteTime <= 0 && !gameOver) {
@@ -140,24 +163,42 @@ export default function Board({ initialFen, initialWhiteTime, initialBlackTime, 
             const cpuTimer = setTimeout(() => {
                 const move = getBestMove(board, 'b');
                 if (move) {
-                    performMove(move.from, move.to);
+                    performMove(move.from, move.to, 'q');
                 }
             }, 1000);
             return () => clearTimeout(cpuTimer);
         }
     }, [turn, isVsCpu, isPaused, board, gameOver]);
 
-    const performMove = (from: Position, to: Position) => {
+    const performMove = (from: Position, to: Position, promotionType?: PieceType) => {
         const newBoard = board.map(r => [...r]);
-        newBoard[to.row][to.col] = newBoard[from.row][from.col];
+        const movingPiece = board[from.row][from.col];
+        const targetPiece = board[to.row][to.col];
+        const isPawnMove = movingPiece?.type === 'p';
+        const isCapture = targetPiece !== null;
+
+        if (isPawnMove || isCapture) {
+            setHalfMoveClock(0);
+        } else {
+            setHalfMoveClock(prev => prev + 1);
+        }
+        if (movingPiece) {
+            if (promotionType) {
+                newBoard[to.row][to.col] = { ...movingPiece, type: promotionType, hasMoved: true };
+            } else {
+                newBoard[to.row][to.col] = { ...movingPiece, hasMoved: true };
+            }
+        }
         newBoard[from.row][from.col] = null;
 
-        if (newBoard[to.row][to.col]) {
-            newBoard[to.row][to.col]!.hasMoved = true;
-        }
+        const nextTurn = turn === 'w' ? 'b' : 'w';
+        const nextFen = boardToFen(newBoard, nextTurn);
+        const newHistory = { ...positionHistory };
+        newHistory[nextFen] = (newHistory[nextFen] || 0) + 1;
 
+        setPositionHistory(newHistory);
         setBoard(newBoard);
-        setTurn(prev => prev === 'w' ? 'b' : 'w');
+        setTurn(nextTurn);
         setSelectedPos(null);
         setPossibleMoves([]);
         playMoveSound();
@@ -199,11 +240,28 @@ export default function Board({ initialFen, initialWhiteTime, initialBlackTime, 
             const isTargetPossible = possibleMoves.some(p => p.row === row && p.col === col);
 
             if (isTargetPossible && isMoveValid(board, from, to, turn)) {
-                performMove(from, to);
+                const piece = board[from.row][from.col];
+                const isPawn = piece?.type === 'p';
+                const isPromotionRank = (piece?.color === 'w' && row === 0) || (piece?.color === 'b' && row === 7);
+
+                if (isPawn && isPromotionRank) {
+                    setPendingMove({ from, to });
+                    setShowPromotionModal(true);
+                } else {
+                    performMove(from, to);
+                }
             } else {
                 setSelectedPos(null);
                 setPossibleMoves([]);
             }
+        }
+    };
+
+    const handlePromotionSelect = (type: PieceType) => {
+        if (pendingMove) {
+            performMove(pendingMove.from, pendingMove.to, type);
+            setShowPromotionModal(false);
+            setPendingMove(null);
         }
     };
 
@@ -244,6 +302,8 @@ export default function Board({ initialFen, initialWhiteTime, initialBlackTime, 
         setGameOver(null);
         setIsVsCpu(vsCpuMode);
         setIsPaused(false);
+        setHalfMoveClock(0);
+        setPositionHistory({ [INITIAL_FEN]: 1 });
     };
 
     const kingInCheckPos = (() => {
@@ -291,6 +351,33 @@ export default function Board({ initialFen, initialWhiteTime, initialBlackTime, 
                             >
                                 <Text style={styles.modalBtnText}>Regresar al Menú</Text>
                             </TouchableOpacity>
+                        </View>
+                    </View>
+                </View>
+            </Modal>
+            <Modal
+                transparent={true}
+                visible={showPromotionModal}
+                animationType="fade"
+            >
+                <View style={styles.modalOverlay}>
+                    <View style={styles.modalContent}>
+                        <Text style={styles.modalTitle}>¡Promoción!</Text>
+                        <Text style={styles.modalReason}>Elige una pieza:</Text>
+
+                        <View style={styles.promotionContainer}>
+                            {(['q', 'r', 'b', 'n'] as PieceType[]).map((type) => (
+                                <TouchableOpacity
+                                    key={type}
+                                    style={styles.promotionBtn}
+                                    onPress={() => handlePromotionSelect(type)}
+                                >
+                                    <Image
+                                        source={PIECES_IMG[`${turn}_${type}`]}
+                                        style={styles.promotionImage}
+                                    />
+                                </TouchableOpacity>
+                            ))}
                         </View>
                     </View>
                 </View>
@@ -551,5 +638,23 @@ const styles = StyleSheet.create({
         color: 'white',
         fontSize: 16,
         fontWeight: 'bold',
+    },
+    promotionContainer: {
+        flexDirection: 'row',
+        justifyContent: 'space-around',
+        width: '100%',
+        marginTop: 20,
+        marginBottom: 10
+    },
+    promotionBtn: {
+        backgroundColor: COLORS.CLARO,
+        padding: 10,
+        borderRadius: 8,
+        elevation: 3
+    },
+    promotionImage: {
+        width: 50,
+        height: 50,
+        resizeMode: 'contain'
     }
 });

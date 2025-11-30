@@ -288,3 +288,29 @@ export const getBestMove = (board: (Piece | null)[][], turn: PieceColor) => {
     }
     return bestMove;
 };
+
+/**
+ * Verifica si hay material insuficiente para dar mate (Tablas).
+ * Regla basica: K vs K, K+N vs K, K+B vs K.
+ */
+export const hasInsufficientMaterial = (board: (Piece | null)[][]): boolean => {
+    const pieces: Piece[] = [];
+    for (let r = 0; r < 8; r++) {
+        for (let c = 0; c < 8; c++) {
+            const p = board[r][c];
+            if (p) pieces.push(p);
+        }
+    }
+
+    // Solo quedan los 2 reyes
+    if (pieces.length === 2) return true;
+
+    // Rey + (Caballo o Alfil) vs Rey
+    if (pieces.length === 3) {
+        // Verificamos si la pieza que sobra es Caballo (n) o Alfil (b)
+        const hasMinor = pieces.some(p => p.type === 'n' || p.type === 'b');
+        return hasMinor;
+    }
+
+    return false;
+};
